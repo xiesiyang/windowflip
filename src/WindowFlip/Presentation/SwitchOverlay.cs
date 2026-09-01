@@ -9,7 +9,7 @@ namespace WindowFlip.Presentation;
 
 internal sealed class SwitchOverlay : Form
 {
-    private const int MaximumVisibleCards = 5;
+    private const int MaximumColumns = 5;
     private const int CardWidth = 210;
     private const int CardHeight = 178;
     private const int CardGap = 12;
@@ -25,7 +25,8 @@ internal sealed class SwitchOverlay : Form
     private string? message;
     private nint selectedHandle;
     private float scale = 1.0f;
-    private int visibleCardCount;
+    private int cardColumnCount;
+    private int cardRowCount;
     private bool selectionShowing;
 
     public SwitchOverlay(IWindowIconProvider iconProvider)
@@ -50,6 +51,35 @@ internal sealed class SwitchOverlay : Form
     protected override bool ShowWithoutActivation => true;
 
     internal int RegisteredThumbnailCount => windows.Count(window => window.Thumbnail != 0);
+
+    internal int CardRowCount => cardRowCount;
+
+    internal static CardGridLayout CalculateCardGrid(int windowCount, int workingAreaWidth, float scale)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(windowCount);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(workingAreaWidth);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(scale);
+
+        int cardWidth = Scale(CardWidth, scale);
+        int cardHeight = Scale(CardHeight, scale);
+        int gap = Scale(CardGap, scale);
+        int outerPadding = Scale(OuterPadding, scale);
+        int availableWidth = Math.Max(cardWidth, workingAreaWidth - Scale(48, scale));
+        int columnsThatFit = Math.Max(
+            1,
+            (availableWidth - (outerPadding * 2) + gap) / (cardWidth + gap));
+        int columns = Math.Max(1, Math.Min(windowCount, Math.Min(MaximumColumns, columnsThatFit)));
+        int rows = Math.Max(1, (windowCount + columns - 1) / columns);
+        int contentWidth = columns * cardWidth + Math.Max(0, columns - 1) * gap;
+        int contentHeight = rows * cardHeight + Math.Max(0, rows - 1) * gap;
+
+        return new CardGridLayout(
+            columns,
+            rows,
+            new Size(
+                contentWidth + (outerPadding * 2),
+                Scale(HeaderHeight, scale) + contentHeight + outerPadding));
+    }
 
     protected override CreateParams CreateParams
     {
@@ -131,19 +161,15 @@ internal sealed class SwitchOverlay : Form
         Rectangle area = screen.WorkingArea;
         if (message is null)
         {
-            int availableWidth = Math.Max(Px(CardWidth), area.Width - Px(48));
-            int fit = Math.Max(1, (availableWidth - Px(OuterPadding * 2) + Px(CardGap)) /
-                Px(CardWidth + CardGap));
-            visibleCardCount = Math.Min(windows.Count, Math.Min(MaximumVisibleCards, fit));
-            int contentWidth = visibleCardCount * Px(CardWidth) +
-                Math.Max(0, visibleCardCount - 1) * Px(CardGap);
-            Size = new Size(
-                contentWidth + Px(OuterPadding * 2),
-                Px(HeaderHeight + CardHeight + OuterPadding));
+            CardGridLayout layout = CalculateCardGrid(windows.Count, area.Width, scale);
+            cardColumnCount = layout.Columns;
+            cardRowCount = layout.Rows;
+            Size = layout.Size;
         }
         else
         {
-            visibleCardCount = 0;
+            cardColumnCount = 0;
+            cardRowCount = 0;
             Size = new Size(Math.Min(Px(520), area.Width - Px(32)), Px(98));
         }
 
@@ -195,10 +221,9 @@ internal sealed class SwitchOverlay : Form
             return;
         }
 
-        List<OverlayWindow> visibleWindows = GetVisibleWindows();
-        for (int index = 0; index < visibleWindows.Count; index++)
+        for (int index = 0; index < windows.Count; index++)
         {
-            DrawWindowCard(graphics, visibleWindows[index], index, visibleWindows.Count);
+            DrawWindowCard(graphics, windows[index], index);
         }
     }
 
@@ -243,10 +268,9 @@ internal sealed class SwitchOverlay : Form
     private void DrawWindowCard(
         Graphics graphics,
         OverlayWindow window,
-        int visibleIndex,
-        int count)
+        int index)
     {
-        Rectangle card = GetCardBounds(visibleIndex, count);
+        Rectangle card = GetCardBounds(index);
         bool selected = window.Descriptor.Handle == selectedHandle;
         using Brush cardBackground = new SolidBrush(
             selected ? Color.FromArgb(54, 57, 62) : Color.FromArgb(42, 44, 48));
@@ -320,13 +344,11 @@ internal sealed class SwitchOverlay : Form
             return;
         }
 
-        List<OverlayWindow> visibleWindows = GetVisibleWindows();
-        foreach (OverlayWindow window in windows)
+        for (int index = 0; index < windows.Count; index++)
         {
-            int visibleIndex = visibleWindows.IndexOf(window);
-            bool visible = visibleIndex >= 0;
+            OverlayWindow window = windows[index];
 
-            if (visible && window.Thumbnail == 0 &&
+            if (window.Thumbnail == 0 &&
                 NativeMethods.DwmRegisterThumbnail(Handle, window.Descriptor.Handle, out nint thumbnail) == 0)
             {
                 window.Thumbnail = thumbnail;
@@ -337,22 +359,18 @@ internal sealed class SwitchOverlay : Form
                 continue;
             }
 
-            Rectangle destination = visible
-                ? GetFittedThumbnailBounds(
-                    window.Thumbnail,
-                    GetPreviewBounds(GetCardBounds(visibleIndex, visibleWindows.Count)))
-                : Rectangle.Empty;
+            Rectangle destination = GetFittedThumbnailBounds(
+                window.Thumbnail,
+                GetPreviewBounds(GetCardBounds(index)));
             NativeMethods.DwmThumbnailProperties properties = new()
             {
-                Flags = visible
-                    ? NativeMethods.DwmTnpRectDestination |
-                        NativeMethods.DwmTnpOpacity |
-                        NativeMethods.DwmTnpVisible |
-                        NativeMethods.DwmTnpSourceClientAreaOnly
-                    : NativeMethods.DwmTnpVisible,
+                Flags = NativeMethods.DwmTnpRectDestination |
+                    NativeMethods.DwmTnpOpacity |
+                    NativeMethods.DwmTnpVisible |
+                    NativeMethods.DwmTnpSourceClientAreaOnly,
                 Destination = new NativeMethods.NativeRect(destination),
                 Opacity = byte.MaxValue,
-                Visible = visible,
+                Visible = true,
                 SourceClientAreaOnly = false
             };
             if (NativeMethods.DwmUpdateThumbnailProperties(window.Thumbnail, ref properties) != 0)
@@ -383,11 +401,15 @@ internal sealed class SwitchOverlay : Form
             height);
     }
 
-    private Rectangle GetCardBounds(int visibleIndex, int count)
+    private Rectangle GetCardBounds(int index)
     {
-        int totalWidth = count * Px(CardWidth) + Math.Max(0, count - 1) * Px(CardGap);
-        int left = (Width - totalWidth) / 2 + visibleIndex * Px(CardWidth + CardGap);
-        return new Rectangle(left, Px(HeaderHeight), Px(CardWidth), Px(CardHeight));
+        int row = index / cardColumnCount;
+        int column = index % cardColumnCount;
+        int windowsInRow = Math.Min(cardColumnCount, windows.Count - (row * cardColumnCount));
+        int rowWidth = windowsInRow * Px(CardWidth) + Math.Max(0, windowsInRow - 1) * Px(CardGap);
+        int left = (Width - rowWidth) / 2 + column * (Px(CardWidth) + Px(CardGap));
+        int top = Px(HeaderHeight) + row * (Px(CardHeight) + Px(CardGap));
+        return new Rectangle(left, top, Px(CardWidth), Px(CardHeight));
     }
 
     private Rectangle GetPreviewBounds(Rectangle card)
@@ -399,25 +421,6 @@ internal sealed class SwitchOverlay : Form
             Px(PreviewHeight));
     }
 
-    private List<OverlayWindow> GetVisibleWindows()
-    {
-        if (windows.Count <= visibleCardCount)
-        {
-            return [.. windows];
-        }
-
-        int selectedIndex = windows.FindIndex(window => window.Descriptor.Handle == selectedHandle);
-        if (selectedIndex < 0)
-        {
-            selectedIndex = 0;
-        }
-
-        int start = Math.Max(
-            0,
-            Math.Min(selectedIndex - (visibleCardCount / 2), windows.Count - visibleCardCount));
-        return windows.Skip(start).Take(visibleCardCount).ToList();
-    }
-
     private bool HasSameWindows(IReadOnlyList<WindowDescriptor> orderedWindows)
     {
         return windows.Count == orderedWindows.Count &&
@@ -426,6 +429,11 @@ internal sealed class SwitchOverlay : Form
     }
 
     private int Px(int value)
+    {
+        return Scale(value, scale);
+    }
+
+    private static int Scale(int value, float scale)
     {
         return Math.Max(1, (int)Math.Round(value * scale));
     }
@@ -474,4 +482,6 @@ internal sealed class SwitchOverlay : Form
 
         public nint Thumbnail { get; set; }
     }
+
+    internal readonly record struct CardGridLayout(int Columns, int Rows, Size Size);
 }

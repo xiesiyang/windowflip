@@ -67,26 +67,43 @@ internal static class SelfTest
 
     private static void VerifyThumbnailOverlay()
     {
-        using Form first = new() { Text = "WindowFlip thumbnail A", Size = new Size(360, 220) };
-        using Form second = new() { Text = "WindowFlip thumbnail B", Size = new Size(360, 220) };
-        first.Show();
-        second.Show();
-        System.Windows.Forms.Application.DoEvents();
+        Form[] forms = Enumerable.Range(1, 6)
+            .Select(index => new Form
+            {
+                Text = "WindowFlip thumbnail " + index,
+                Size = new Size(360, 220)
+            })
+            .ToArray();
 
-        using SwitchOverlay overlay = new(new Win32WindowIconProvider());
-        overlay.ShowSelection(
-            "WindowFlip self-test",
-            Environment.ProcessPath,
-            [
-                new WindowDescriptor(first.Handle, first.Text),
-                new WindowDescriptor(second.Handle, second.Text)
-            ],
-            second.Handle);
-        System.Windows.Forms.Application.DoEvents();
+        try
+        {
+            foreach (Form form in forms)
+            {
+                form.Show();
+            }
 
-        Assert(overlay.Visible, "thumbnail overlay visibility");
-        Assert(overlay.RegisteredThumbnailCount == 2, "DWM thumbnail registration");
-        overlay.HideSelection();
+            System.Windows.Forms.Application.DoEvents();
+
+            using SwitchOverlay overlay = new(new Win32WindowIconProvider());
+            overlay.ShowSelection(
+                "WindowFlip self-test",
+                Environment.ProcessPath,
+                forms.Select(form => new WindowDescriptor(form.Handle, form.Text)).ToArray(),
+                forms[^1].Handle);
+            System.Windows.Forms.Application.DoEvents();
+
+            Assert(overlay.Visible, "thumbnail overlay visibility");
+            Assert(overlay.CardRowCount >= 2, "thumbnail overlay wrapping");
+            Assert(overlay.RegisteredThumbnailCount == forms.Length, "all DWM thumbnails registered");
+            overlay.HideSelection();
+        }
+        finally
+        {
+            foreach (Form form in forms)
+            {
+                form.Dispose();
+            }
+        }
     }
 
     private static void Assert(bool condition, string name)
