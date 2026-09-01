@@ -1,3 +1,11 @@
-WindowFlip.exe
-WindowFlip.ico
-WindowFlip.build.exe
+bin/
+obj/
+artifacts/
+TestResults/
+*.user
+*.suo
+
+# Legacy root-level outputs from the former CodeDOM build.
+/WindowFlip.exe
+/WindowFlip.ico
+/WindowFlip.build.exe
