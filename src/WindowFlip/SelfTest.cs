@@ -82,6 +82,15 @@ internal static class SelfTest
                 form.Show();
             }
 
+            Screen anchorScreen = Screen.PrimaryScreen!;
+            Screen selectedScreen = Screen.AllScreens.FirstOrDefault(
+                screen => screen.DeviceName != anchorScreen.DeviceName) ?? anchorScreen;
+            forms[0].Location = new Point(
+                anchorScreen.WorkingArea.Left + 20,
+                anchorScreen.WorkingArea.Top + 20);
+            forms[^1].Location = new Point(
+                selectedScreen.WorkingArea.Left + 20,
+                selectedScreen.WorkingArea.Top + 20);
             System.Windows.Forms.Application.DoEvents();
 
             using SwitchOverlay overlay = new(new Win32WindowIconProvider());
@@ -89,10 +98,14 @@ internal static class SelfTest
                 "WindowFlip self-test",
                 Environment.ProcessPath,
                 forms.Select(form => new WindowDescriptor(form.Handle, form.Text)).ToArray(),
-                forms[^1].Handle);
+                forms[^1].Handle,
+                forms[0].Handle);
             System.Windows.Forms.Application.DoEvents();
 
             Assert(overlay.Visible, "thumbnail overlay visibility");
+            Assert(
+                Screen.FromHandle(overlay.Handle).DeviceName == Screen.FromHandle(forms[0].Handle).DeviceName,
+                "thumbnail overlay screen anchor");
             Assert(overlay.CardRowCount >= 2, "thumbnail overlay wrapping");
             Assert(overlay.RegisteredThumbnailCount == forms.Length, "all DWM thumbnails registered");
             overlay.HideSelection();

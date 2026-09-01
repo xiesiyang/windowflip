@@ -96,7 +96,8 @@ internal sealed class SwitchOverlay : Form
         string appName,
         string? executablePath,
         IReadOnlyList<WindowDescriptor> orderedWindows,
-        nint selected)
+        nint selected,
+        nint anchor)
     {
         applicationName = appName ?? string.Empty;
         message = null;
@@ -122,7 +123,7 @@ internal sealed class SwitchOverlay : Form
             }
         }
 
-        ShowOverlay(selected, autoHide: false);
+        ShowOverlay(anchor, autoHide: false);
     }
 
     public void ShowMessage(string appName, string text, nint anchor)

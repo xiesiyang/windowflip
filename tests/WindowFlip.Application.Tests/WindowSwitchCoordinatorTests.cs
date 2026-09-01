@@ -78,6 +78,8 @@ public sealed class WindowSwitchCoordinatorTests
 
         Assert.Equal((nint)2, first.TargetHandle);
         Assert.Equal((nint)3, second.TargetHandle);
+        Assert.Equal(fixture.ForegroundHandle, first.ForegroundHandle);
+        Assert.Equal(fixture.ForegroundHandle, second.ForegroundHandle);
         Assert.Empty(fixture.ActivationTargets);
 
         SwitchResult committed = coordinator.Commit();

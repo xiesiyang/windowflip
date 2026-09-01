@@ -129,7 +129,8 @@ internal sealed class TrayApplicationContext : ApplicationContext
                 result.ApplicationName,
                 result.ExecutablePath,
                 result.OrderedWindows ?? [],
-                result.TargetHandle);
+                result.TargetHandle,
+                result.ForegroundHandle);
         }
 
         if (result.Status == SwitchStatus.OnlyOneWindow)
