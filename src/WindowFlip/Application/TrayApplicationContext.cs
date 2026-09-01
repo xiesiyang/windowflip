@@ -30,6 +30,8 @@ internal sealed class TrayApplicationContext : ApplicationContext
         this.appIcon = appIcon;
 
         inputSource.SwitchRequested += OnSwitchRequested;
+        inputSource.SwitchCommitRequested += OnSwitchCommitRequested;
+        inputSource.SwitchCancelRequested += OnSwitchCancelRequested;
         if (!inputSource.TryRegister(out HotkeyRegistration? registration) || registration is null)
         {
             DisposeResources();
@@ -47,7 +49,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
             ContextMenuStrip = menu,
             Visible = true
         };
-        notifyIcon.DoubleClick += (_, _) => Switch(SwitchDirection.Next);
+        notifyIcon.DoubleClick += (_, _) => SwitchImmediately(SwitchDirection.Next);
     }
 
     private ContextMenuStrip BuildMenu(HotkeyRegistration registration)
@@ -55,11 +57,11 @@ internal sealed class TrayApplicationContext : ApplicationContext
         ContextMenuStrip contextMenu = new();
 
         ToolStripMenuItem nextItem = new("下一个窗口    " + registration.NextLabel);
-        nextItem.Click += (_, _) => Switch(SwitchDirection.Next);
+        nextItem.Click += (_, _) => SwitchImmediately(SwitchDirection.Next);
         contextMenu.Items.Add(nextItem);
 
         ToolStripMenuItem previousItem = new("上一个窗口    " + registration.PreviousLabel);
-        previousItem.Click += (_, _) => Switch(SwitchDirection.Previous);
+        previousItem.Click += (_, _) => SwitchImmediately(SwitchDirection.Previous);
         contextMenu.Items.Add(previousItem);
         contextMenu.Items.Add(new ToolStripSeparator());
 
@@ -79,26 +81,63 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
     private void OnSwitchRequested(object? sender, SwitchRequestedEventArgs e)
     {
-        Switch(e.Direction);
+        Select(e.Direction, showOverlay: true);
     }
 
-    private void Switch(SwitchDirection direction)
+    private void OnSwitchCommitRequested(object? sender, SwitchCommitRequestedEventArgs e)
     {
-        SwitchResult result = switchCoordinator.Switch(direction);
-        if (result.Status == SwitchStatus.Switched)
+        SwitchResult result = switchCoordinator.Commit();
+        if (result.Status == SwitchStatus.NoPendingSelection)
+        {
+            return;
+        }
+
+        overlay.HideSelection();
+        if (result.Status == SwitchStatus.ActivationFailed)
+        {
+            overlay.ShowMessage(result.ApplicationName, "无法激活所选窗口", result.ForegroundHandle);
+        }
+    }
+
+    private void OnSwitchCancelRequested(object? sender, SwitchCancelRequestedEventArgs e)
+    {
+        switchCoordinator.Cancel();
+        overlay.HideSelection();
+    }
+
+    private void SwitchImmediately(SwitchDirection direction)
+    {
+        SwitchResult selection = Select(direction, showOverlay: false);
+        if (selection.Status != SwitchStatus.SelectionChanged)
+        {
+            return;
+        }
+
+        SwitchResult result = switchCoordinator.Commit();
+        if (result.Status == SwitchStatus.ActivationFailed)
+        {
+            overlay.ShowMessage(result.ApplicationName, "无法激活所选窗口", result.ForegroundHandle);
+        }
+    }
+
+    private SwitchResult Select(SwitchDirection direction, bool showOverlay)
+    {
+        SwitchResult result = switchCoordinator.Select(direction);
+        if (result.Status == SwitchStatus.SelectionChanged && showOverlay)
         {
             overlay.ShowSelection(
                 result.ApplicationName,
                 result.ExecutablePath,
                 result.OrderedWindows ?? [],
                 result.TargetHandle);
-            return;
         }
 
         if (result.Status == SwitchStatus.OnlyOneWindow)
         {
             overlay.ShowMessage(result.ApplicationName, "当前应用没有其他可切换窗口", result.ForegroundHandle);
         }
+
+        return result;
     }
 
     private void ToggleStartup(object? sender, EventArgs e)
@@ -141,6 +180,8 @@ internal sealed class TrayApplicationContext : ApplicationContext
         }
 
         inputSource.SwitchRequested -= OnSwitchRequested;
+        inputSource.SwitchCommitRequested -= OnSwitchCommitRequested;
+        inputSource.SwitchCancelRequested -= OnSwitchCancelRequested;
         inputSource.Dispose();
         overlay.Dispose();
         menu?.Dispose();

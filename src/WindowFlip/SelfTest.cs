@@ -14,6 +14,7 @@ internal static class SelfTest
             VerifySwitchSession();
             VerifyApplicationIcon();
             VerifyWindowCatalog();
+            VerifyThumbnailOverlay();
             return 0;
         }
         catch
@@ -62,6 +63,30 @@ internal static class SelfTest
         IReadOnlyList<WindowDescriptor> windows = new Win32WindowCatalog(true).GetWindows(identity!);
         Assert(windows.Any(window => window.Handle == first.Handle), "first test window");
         Assert(windows.Any(window => window.Handle == second.Handle), "second test window");
+    }
+
+    private static void VerifyThumbnailOverlay()
+    {
+        using Form first = new() { Text = "WindowFlip thumbnail A", Size = new Size(360, 220) };
+        using Form second = new() { Text = "WindowFlip thumbnail B", Size = new Size(360, 220) };
+        first.Show();
+        second.Show();
+        System.Windows.Forms.Application.DoEvents();
+
+        using SwitchOverlay overlay = new(new Win32WindowIconProvider());
+        overlay.ShowSelection(
+            "WindowFlip self-test",
+            Environment.ProcessPath,
+            [
+                new WindowDescriptor(first.Handle, first.Text),
+                new WindowDescriptor(second.Handle, second.Text)
+            ],
+            second.Handle);
+        System.Windows.Forms.Application.DoEvents();
+
+        Assert(overlay.Visible, "thumbnail overlay visibility");
+        Assert(overlay.RegisteredThumbnailCount == 2, "DWM thumbnail registration");
+        overlay.HideSelection();
     }
 
     private static void Assert(bool condition, string name)

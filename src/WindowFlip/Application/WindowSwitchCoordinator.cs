@@ -10,30 +10,49 @@ internal sealed class WindowSwitchCoordinator(
     WindowSwitchSession session,
     TimeProvider timeProvider)
 {
-    public SwitchResult Switch(SwitchDirection direction)
-    {
-        nint foreground = foregroundWindowProvider.GetForegroundWindow();
-        if (foreground == 0)
-        {
-            return new SwitchResult(SwitchStatus.NoForegroundWindow);
-        }
+    private PendingSwitch? pendingSwitch;
 
-        ApplicationIdentity? identity = identityResolver.Resolve(foreground);
-        if (identity is null)
+    public SwitchResult Select(SwitchDirection direction)
+    {
+        nint foreground;
+        nint current;
+        ApplicationIdentity identity;
+
+        if (pendingSwitch is null)
         {
-            return new SwitchResult(SwitchStatus.NoForegroundWindow);
+            foreground = foregroundWindowProvider.GetForegroundWindow();
+            if (foreground == 0)
+            {
+                return new SwitchResult(SwitchStatus.NoForegroundWindow);
+            }
+
+            ApplicationIdentity? resolvedIdentity = identityResolver.Resolve(foreground);
+            if (resolvedIdentity is null)
+            {
+                return new SwitchResult(SwitchStatus.NoForegroundWindow);
+            }
+
+            identity = resolvedIdentity;
+            current = foreground;
+        }
+        else
+        {
+            foreground = pendingSwitch.ForegroundHandle;
+            current = pendingSwitch.TargetHandle;
+            identity = pendingSwitch.Identity;
         }
 
         IReadOnlyList<WindowDescriptor> windows = windowCatalog.GetWindows(identity);
         SwitchSelectionResult selection = session.Select(
             identity.Key,
-            foreground,
+            current,
             windows,
             direction,
             timeProvider.GetUtcNow());
 
         if (selection.Status is SwitchSelectionStatus.NoWindows or SwitchSelectionStatus.OnlyOneWindow)
         {
+            pendingSwitch = null;
             return new SwitchResult(
                 SwitchStatus.OnlyOneWindow,
                 identity.DisplayName,
@@ -42,13 +61,48 @@ internal sealed class WindowSwitchCoordinator(
                 OrderedWindows: selection.OrderedWindows);
         }
 
-        bool activated = windowActivator.Activate(selection.SelectedHandle);
+        pendingSwitch = new PendingSwitch(
+            identity,
+            foreground,
+            selection.SelectedHandle,
+            selection.OrderedWindows);
+
         return new SwitchResult(
-            activated ? SwitchStatus.Switched : SwitchStatus.ActivationFailed,
+            SwitchStatus.SelectionChanged,
             identity.DisplayName,
             identity.ExecutablePath,
             foreground,
             selection.SelectedHandle,
             selection.OrderedWindows);
     }
+
+    public SwitchResult Commit()
+    {
+        PendingSwitch? selection = pendingSwitch;
+        pendingSwitch = null;
+        if (selection is null)
+        {
+            return new SwitchResult(SwitchStatus.NoPendingSelection);
+        }
+
+        bool activated = windowActivator.Activate(selection.TargetHandle);
+        return new SwitchResult(
+            activated ? SwitchStatus.Switched : SwitchStatus.ActivationFailed,
+            selection.Identity.DisplayName,
+            selection.Identity.ExecutablePath,
+            selection.ForegroundHandle,
+            selection.TargetHandle,
+            selection.OrderedWindows);
+    }
+
+    public void Cancel()
+    {
+        pendingSwitch = null;
+    }
+
+    private sealed record PendingSwitch(
+        ApplicationIdentity Identity,
+        nint ForegroundHandle,
+        nint TargetHandle,
+        IReadOnlyList<WindowDescriptor> OrderedWindows);
 }

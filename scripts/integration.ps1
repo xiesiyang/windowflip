@@ -58,6 +58,18 @@ public static extern System.IntPtr GetForegroundWindow();
 public static extern bool SetForegroundWindow(System.IntPtr window);
 
 [System.Runtime.InteropServices.DllImport("user32.dll")]
+public static extern bool BringWindowToTop(System.IntPtr window);
+
+[System.Runtime.InteropServices.DllImport("user32.dll")]
+public static extern uint GetWindowThreadProcessId(System.IntPtr window, out uint processId);
+
+[System.Runtime.InteropServices.DllImport("user32.dll")]
+public static extern bool AttachThreadInput(uint firstThread, uint secondThread, bool attach);
+
+[System.Runtime.InteropServices.DllImport("kernel32.dll")]
+public static extern uint GetCurrentThreadId();
+
+[System.Runtime.InteropServices.DllImport("user32.dll")]
 public static extern bool ShowWindowAsync(System.IntPtr window, int command);
 
 [System.Runtime.InteropServices.DllImport("user32.dll")]
@@ -98,10 +110,71 @@ function Wait-ForForeground {
     return $false
 }
 
-function Send-WindowFlipHotkey {
+function Set-TestForeground {
+    param(
+        [Parameter(Mandatory = $true)]
+        [IntPtr]$Window
+    )
+
+    $currentThread = [WindowFlipIntegration.NativeMethods]::GetCurrentThreadId()
+    $foregroundWindow = [WindowFlipIntegration.NativeMethods]::GetForegroundWindow()
+    $processId = [uint32]0
+    $foregroundThread = if ($foregroundWindow -ne [IntPtr]::Zero) {
+        [WindowFlipIntegration.NativeMethods]::GetWindowThreadProcessId(
+            $foregroundWindow,
+            [ref]$processId)
+    }
+    else {
+        0
+    }
+    $targetThread = [WindowFlipIntegration.NativeMethods]::GetWindowThreadProcessId(
+        $Window,
+        [ref]$processId)
+
+    $attachedForeground = $foregroundThread -ne 0 -and $foregroundThread -ne $currentThread
+    $attachedTarget = $targetThread -ne 0 -and $targetThread -ne $currentThread
+    if ($attachedForeground) {
+        [WindowFlipIntegration.NativeMethods]::AttachThreadInput(
+            $currentThread,
+            $foregroundThread,
+            $true) | Out-Null
+    }
+    if ($attachedTarget) {
+        [WindowFlipIntegration.NativeMethods]::AttachThreadInput(
+            $currentThread,
+            $targetThread,
+            $true) | Out-Null
+    }
+
+    try {
+        [WindowFlipIntegration.NativeMethods]::ShowWindowAsync($Window, 9) | Out-Null
+        [WindowFlipIntegration.NativeMethods]::BringWindowToTop($Window) | Out-Null
+        [WindowFlipIntegration.NativeMethods]::SetForegroundWindow($Window) | Out-Null
+    }
+    finally {
+        if ($attachedTarget) {
+            [WindowFlipIntegration.NativeMethods]::AttachThreadInput(
+                $currentThread,
+                $targetThread,
+                $false) | Out-Null
+        }
+        if ($attachedForeground) {
+            [WindowFlipIntegration.NativeMethods]::AttachThreadInput(
+                $currentThread,
+                $foregroundThread,
+                $false) | Out-Null
+        }
+    }
+
+    return Wait-ForForeground -Expected $Window
+}
+
+function Press-WindowFlipHotkey {
     param(
         [ValidateSet('Alt', 'Win')]
         [string]$Modifier,
+        [ValidateRange(1, 10)]
+        [int]$PressCount = 1,
         [switch]$Reverse
     )
 
@@ -114,12 +187,59 @@ function Send-WindowFlipHotkey {
     if ($Reverse) {
         [WindowFlipIntegration.NativeMethods]::keybd_event($vkShift, 0, 0, [UIntPtr]::Zero)
     }
-    [WindowFlipIntegration.NativeMethods]::keybd_event($vkOem3, 0, 0, [UIntPtr]::Zero)
-    [WindowFlipIntegration.NativeMethods]::keybd_event($vkOem3, 0, $keyUp, [UIntPtr]::Zero)
+    for ($press = 0; $press -lt $PressCount; $press++) {
+        [WindowFlipIntegration.NativeMethods]::keybd_event($vkOem3, 0, 0, [UIntPtr]::Zero)
+        [WindowFlipIntegration.NativeMethods]::keybd_event($vkOem3, 0, $keyUp, [UIntPtr]::Zero)
+        Start-Sleep -Milliseconds 50
+    }
     if ($Reverse) {
         [WindowFlipIntegration.NativeMethods]::keybd_event($vkShift, 0, $keyUp, [UIntPtr]::Zero)
     }
+}
+
+function Release-WindowFlipHotkey {
+    param(
+        [ValidateSet('Alt', 'Win')]
+        [string]$Modifier
+    )
+
+    $keyUp = 0x0002
+    $vkModifier = if ($Modifier -eq 'Alt') { 0x12 } else { 0x5B }
     [WindowFlipIntegration.NativeMethods]::keybd_event($vkModifier, 0, $keyUp, [UIntPtr]::Zero)
+}
+
+function Invoke-WindowFlipHotkeyTest {
+    param(
+        [ValidateSet('Alt', 'Win')]
+        [string]$Modifier,
+        [Parameter(Mandatory = $true)]
+        [IntPtr]$BeforeRelease,
+        [Parameter(Mandatory = $true)]
+        [IntPtr]$AfterRelease,
+        [ValidateRange(1, 10)]
+        [int]$PressCount = 1,
+        [switch]$Reverse
+    )
+
+    Press-WindowFlipHotkey `
+        -Modifier $Modifier `
+        -PressCount $PressCount `
+        -Reverse:$Reverse
+    Start-Sleep -Milliseconds 300
+
+    if ([WindowFlipIntegration.NativeMethods]::GetForegroundWindow() -ne $BeforeRelease) {
+        Release-WindowFlipHotkey -Modifier $Modifier
+        throw 'The target window changed before the shortcut modifier was released.'
+    }
+
+    $windowFlipProcess.Refresh()
+    $overlayWasVisible = $windowFlipProcess.MainWindowHandle -ne [IntPtr]::Zero
+    Release-WindowFlipHotkey -Modifier $Modifier
+
+    return [pscustomobject]@{
+        Switched = Wait-ForForeground -Expected $AfterRelease -Attempts 20
+        OverlayWasVisible = $overlayWasVisible
+    }
 }
 
 try {
@@ -158,29 +278,42 @@ try {
     }
 
     [WindowFlipIntegration.NativeMethods]::ShowWindowAsync($secondHandle, 6) | Out-Null
-    [WindowFlipIntegration.NativeMethods]::ShowWindowAsync($firstHandle, 9) | Out-Null
-    [WindowFlipIntegration.NativeMethods]::SetForegroundWindow($firstHandle) | Out-Null
-    if (-not (Wait-ForForeground -Expected $firstHandle)) {
+    if (-not (Set-TestForeground -Window $firstHandle)) {
         throw 'Could not activate the first test window.'
     }
 
     $registeredModifier = if ($foreignWindowFlipExists) { 'Win' } else { 'Alt' }
-    Send-WindowFlipHotkey -Modifier $registeredModifier
-    $forwardPassed = Wait-ForForeground -Expected $secondHandle -Attempts 20
+    $forwardResult = Invoke-WindowFlipHotkeyTest `
+        -Modifier $registeredModifier `
+        -BeforeRelease $firstHandle `
+        -AfterRelease $secondHandle `
+        -PressCount 3
+    $forwardPassed = $forwardResult.Switched
     if (-not $forwardPassed -and -not $foreignWindowFlipExists) {
         $registeredModifier = 'Win'
-        Send-WindowFlipHotkey -Modifier $registeredModifier
-        $forwardPassed = Wait-ForForeground -Expected $secondHandle -Attempts 20
+        $forwardResult = Invoke-WindowFlipHotkeyTest `
+            -Modifier $registeredModifier `
+            -BeforeRelease $firstHandle `
+            -AfterRelease $secondHandle `
+            -PressCount 3
+        $forwardPassed = $forwardResult.Switched
     }
     if (-not $forwardPassed) {
         throw 'Neither registered hotkey candidate activated the second test window.'
+    }
+    if (-not $forwardResult.OverlayWasVisible) {
+        throw 'The thumbnail overlay was not visible while the shortcut modifier was held.'
     }
     if ([WindowFlipIntegration.NativeMethods]::IsIconic($secondHandle)) {
         throw 'The minimized target window was not restored.'
     }
 
-    Send-WindowFlipHotkey -Modifier $registeredModifier -Reverse
-    $backwardPassed = Wait-ForForeground -Expected $firstHandle
+    $backwardResult = Invoke-WindowFlipHotkeyTest `
+        -Modifier $registeredModifier `
+        -BeforeRelease $secondHandle `
+        -AfterRelease $firstHandle `
+        -Reverse
+    $backwardPassed = $backwardResult.Switched
     if (-not $backwardPassed) {
         throw 'The reverse hotkey did not return to the first test window.'
     }
@@ -190,6 +323,9 @@ try {
         SingleInstance = $true
         ForwardSwitch = $forwardPassed
         BackwardSwitch = $backwardPassed
+        DeferredUntilModifierRelease = $true
+        RepeatedSelectionWhileHeld = $true
+        ThumbnailOverlayVisible = $forwardResult.OverlayWasVisible
         MinimizedWindowRestored = $true
         CoexistedWithUserInstance = $foreignWindowFlipExists
         RegisteredModifier = $registeredModifier

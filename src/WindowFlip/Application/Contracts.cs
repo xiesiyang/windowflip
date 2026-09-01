@@ -39,5 +39,9 @@ internal interface ISwitchInputSource : IDisposable
 {
     event EventHandler<SwitchRequestedEventArgs>? SwitchRequested;
 
+    event EventHandler<SwitchCommitRequestedEventArgs>? SwitchCommitRequested;
+
+    event EventHandler<SwitchCancelRequestedEventArgs>? SwitchCancelRequested;
+
     bool TryRegister(out HotkeyRegistration? registration);
 }

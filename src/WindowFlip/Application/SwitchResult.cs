@@ -6,6 +6,8 @@ internal enum SwitchStatus
 {
     NoForegroundWindow,
     OnlyOneWindow,
+    SelectionChanged,
+    NoPendingSelection,
     Switched,
     ActivationFailed
 }

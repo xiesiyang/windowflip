@@ -18,7 +18,7 @@ public sealed class WindowSwitchCoordinatorTests
     {
         Fixture fixture = new() { ForegroundHandle = 0 };
 
-        SwitchResult result = fixture.CreateCoordinator().Switch(SwitchDirection.Next);
+        SwitchResult result = fixture.CreateCoordinator().Select(SwitchDirection.Next);
 
         Assert.Equal(SwitchStatus.NoForegroundWindow, result.Status);
         Assert.Equal(0, fixture.CatalogCalls);
@@ -30,7 +30,7 @@ public sealed class WindowSwitchCoordinatorTests
     {
         Fixture fixture = new() { Identity = null };
 
-        SwitchResult result = fixture.CreateCoordinator().Switch(SwitchDirection.Next);
+        SwitchResult result = fixture.CreateCoordinator().Select(SwitchDirection.Next);
 
         Assert.Equal(SwitchStatus.NoForegroundWindow, result.Status);
         Assert.Equal(0, fixture.CatalogCalls);
@@ -48,35 +48,82 @@ public sealed class WindowSwitchCoordinatorTests
                 .ToArray()
         };
 
-        SwitchResult result = fixture.CreateCoordinator().Switch(SwitchDirection.Next);
+        SwitchResult result = fixture.CreateCoordinator().Select(SwitchDirection.Next);
 
         Assert.Equal(SwitchStatus.OnlyOneWindow, result.Status);
         Assert.Empty(fixture.ActivationTargets);
     }
 
     [Fact]
-    public void Switch_ActivatesSelectedWindowAndReturnsOrderedWindows()
+    public void Select_ReturnsSelectionWithoutActivatingWindow()
     {
         Fixture fixture = new();
 
-        SwitchResult result = fixture.CreateCoordinator().Switch(SwitchDirection.Next);
+        SwitchResult result = fixture.CreateCoordinator().Select(SwitchDirection.Next);
 
-        Assert.Equal(SwitchStatus.Switched, result.Status);
+        Assert.Equal(SwitchStatus.SelectionChanged, result.Status);
         Assert.Equal((nint)2, result.TargetHandle);
         Assert.Equal(new nint[] { 1, 2, 3 }, result.OrderedWindows!.Select(window => window.Handle));
-        Assert.Equal(new nint[] { 2 }, fixture.ActivationTargets);
+        Assert.Empty(fixture.ActivationTargets);
     }
 
     [Fact]
-    public void Switch_ReportsActivationFailureWithoutDiscardingSelection()
+    public void Select_AdvancesFromPendingTargetAndCommitActivatesFinalSelection()
+    {
+        Fixture fixture = new();
+        WindowSwitchCoordinator coordinator = fixture.CreateCoordinator();
+
+        SwitchResult first = coordinator.Select(SwitchDirection.Next);
+        SwitchResult second = coordinator.Select(SwitchDirection.Next);
+
+        Assert.Equal((nint)2, first.TargetHandle);
+        Assert.Equal((nint)3, second.TargetHandle);
+        Assert.Empty(fixture.ActivationTargets);
+
+        SwitchResult committed = coordinator.Commit();
+
+        Assert.Equal(SwitchStatus.Switched, committed.Status);
+        Assert.Equal((nint)3, committed.TargetHandle);
+        Assert.Equal(new nint[] { 3 }, fixture.ActivationTargets);
+    }
+
+    [Fact]
+    public void Commit_ReportsActivationFailureWithoutDiscardingResultContext()
     {
         Fixture fixture = new() { ActivationSucceeds = false };
+        WindowSwitchCoordinator coordinator = fixture.CreateCoordinator();
+        coordinator.Select(SwitchDirection.Previous);
 
-        SwitchResult result = fixture.CreateCoordinator().Switch(SwitchDirection.Previous);
+        SwitchResult result = coordinator.Commit();
 
         Assert.Equal(SwitchStatus.ActivationFailed, result.Status);
         Assert.Equal((nint)3, result.TargetHandle);
         Assert.Equal(new nint[] { 3 }, fixture.ActivationTargets);
+    }
+
+    [Fact]
+    public void Cancel_DiscardsPendingSelectionWithoutActivation()
+    {
+        Fixture fixture = new();
+        WindowSwitchCoordinator coordinator = fixture.CreateCoordinator();
+        coordinator.Select(SwitchDirection.Next);
+
+        coordinator.Cancel();
+        SwitchResult result = coordinator.Commit();
+
+        Assert.Equal(SwitchStatus.NoPendingSelection, result.Status);
+        Assert.Empty(fixture.ActivationTargets);
+    }
+
+    [Fact]
+    public void Commit_ReturnsNoPendingSelectionBeforeSelect()
+    {
+        Fixture fixture = new();
+
+        SwitchResult result = fixture.CreateCoordinator().Commit();
+
+        Assert.Equal(SwitchStatus.NoPendingSelection, result.Status);
+        Assert.Empty(fixture.ActivationTargets);
     }
 
     private sealed class Fixture :
