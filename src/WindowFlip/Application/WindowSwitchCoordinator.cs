@@ -95,6 +95,19 @@ internal sealed class WindowSwitchCoordinator(
             selection.OrderedWindows);
     }
 
+    public bool SelectTarget(nint targetHandle)
+    {
+        PendingSwitch? selection = pendingSwitch;
+        if (selection is null ||
+            !selection.OrderedWindows.Any(window => window.Handle == targetHandle))
+        {
+            return false;
+        }
+
+        pendingSwitch = selection with { TargetHandle = targetHandle };
+        return true;
+    }
+
     public void Cancel()
     {
         pendingSwitch = null;

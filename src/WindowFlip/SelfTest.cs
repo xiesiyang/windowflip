@@ -1,6 +1,7 @@
 using System.Drawing;
 using WindowFlip.Core.Switching;
 using WindowFlip.Platform.Windows;
+using WindowFlip.Platform.Windows.Interop;
 using WindowFlip.Presentation;
 
 namespace WindowFlip;
@@ -94,6 +95,8 @@ internal static class SelfTest
             System.Windows.Forms.Application.DoEvents();
 
             using SwitchOverlay overlay = new(new Win32WindowIconProvider());
+            nint committedHandle = 0;
+            overlay.SelectionCommitted += (_, eventArgs) => committedHandle = eventArgs.TargetHandle;
             overlay.ShowSelection(
                 "WindowFlip self-test",
                 Environment.ProcessPath,
@@ -108,6 +111,49 @@ internal static class SelfTest
                 "thumbnail overlay screen anchor");
             Assert(overlay.CardRowCount >= 2, "thumbnail overlay wrapping");
             Assert(overlay.RegisteredThumbnailCount == forms.Length, "all DWM thumbnails registered");
+
+            Rectangle firstTitle = overlay.GetTitleBounds(0);
+            Rectangle firstPreview = overlay.GetPreviewBounds(0);
+            Assert(firstTitle.Bottom <= firstPreview.Top, "title above thumbnail");
+            Point firstPreviewCenter = new(
+                firstPreview.Left + (firstPreview.Width / 2),
+                firstPreview.Top + (firstPreview.Height / 2));
+            nint mousePosition = PackMousePosition(firstPreviewCenter);
+            Assert(
+                NativeMethods.PostMessage(overlay.Handle, NativeMethods.WmMouseMove, 0, mousePosition),
+                "post thumbnail mouse move");
+            System.Windows.Forms.Application.DoEvents();
+            Assert(overlay.HoveredHandle == forms[0].Handle, "mouse thumbnail preview");
+            Assert(
+                overlay.KeyboardSelectedHandle == forms[^1].Handle,
+                "mouse preview preserves keyboard selection");
+
+            Point firstTitleCenter = new(
+                firstTitle.Left + (firstTitle.Width / 2),
+                firstTitle.Top + (firstTitle.Height / 2));
+            Assert(
+                NativeMethods.PostMessage(
+                    overlay.Handle,
+                    NativeMethods.WmMouseMove,
+                    0,
+                    PackMousePosition(firstTitleCenter)),
+                "post title mouse move");
+            System.Windows.Forms.Application.DoEvents();
+            Assert(overlay.HoveredHandle == 0, "title does not preview thumbnail");
+
+            Assert(
+                NativeMethods.PostMessage(overlay.Handle, NativeMethods.WmMouseMove, 0, mousePosition),
+                "restore thumbnail mouse move");
+            System.Windows.Forms.Application.DoEvents();
+
+            Assert(
+                NativeMethods.PostMessage(overlay.Handle, NativeMethods.WmLeftButtonDown, 1, mousePosition),
+                "post thumbnail mouse down");
+            Assert(
+                NativeMethods.PostMessage(overlay.Handle, NativeMethods.WmLeftButtonUp, 0, mousePosition),
+                "post thumbnail mouse up");
+            System.Windows.Forms.Application.DoEvents();
+            Assert(committedHandle == forms[0].Handle, "mouse thumbnail commit");
             overlay.HideSelection();
         }
         finally
@@ -117,6 +163,11 @@ internal static class SelfTest
                 form.Dispose();
             }
         }
+    }
+
+    private static nint PackMousePosition(Point point)
+    {
+        return (nint)((point.Y << 16) | (point.X & 0xffff));
     }
 
     private static void Assert(bool condition, string name)

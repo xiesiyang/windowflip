@@ -10,20 +10,23 @@ namespace WindowFlip.Presentation;
 internal sealed class SwitchOverlay : Form
 {
     private const int MaximumColumns = 5;
-    private const int CardWidth = 210;
-    private const int CardHeight = 178;
+    private const int CardWidth = 307;
+    private const int CardHeight = 237;
     private const int CardGap = 12;
     private const int OuterPadding = 16;
     private const int HeaderHeight = 52;
+    private const int TitleBandHeight = 44;
     private const int PreviewInset = 8;
-    private const int PreviewHeight = 118;
+    private const int PreviewBorderInset = 2;
+    private const int PreviewHeight = 177;
 
     private readonly System.Windows.Forms.Timer hideTimer;
     private readonly IWindowIconProvider iconProvider;
     private readonly List<OverlayWindow> windows = [];
     private string applicationName = string.Empty;
     private string? message;
-    private nint selectedHandle;
+    private nint keyboardSelectedHandle;
+    private nint hoveredHandle;
     private float scale = 1.0f;
     private int cardColumnCount;
     private int cardRowCount;
@@ -48,11 +51,19 @@ internal sealed class SwitchOverlay : Form
         };
     }
 
+    public event EventHandler<OverlaySelectionEventArgs>? SelectionCommitted;
+
     protected override bool ShowWithoutActivation => true;
 
     internal int RegisteredThumbnailCount => windows.Count(window => window.Thumbnail != 0);
 
     internal int CardRowCount => cardRowCount;
+
+    internal nint KeyboardSelectedHandle => keyboardSelectedHandle;
+
+    internal nint HoveredHandle => hoveredHandle;
+
+    internal static Size LogicalPreviewSize => new(CardWidth - (PreviewInset * 2), PreviewHeight);
 
     internal static CardGridLayout CalculateCardGrid(int windowCount, int workingAreaWidth, float scale)
     {
@@ -101,7 +112,7 @@ internal sealed class SwitchOverlay : Form
     {
         applicationName = appName ?? string.Empty;
         message = null;
-        selectedHandle = selected;
+        keyboardSelectedHandle = selected;
         selectionShowing = true;
         hideTimer.Stop();
 
@@ -130,7 +141,8 @@ internal sealed class SwitchOverlay : Form
     {
         applicationName = appName ?? string.Empty;
         message = text;
-        selectedHandle = 0;
+        keyboardSelectedHandle = 0;
+        hoveredHandle = 0;
         selectionShowing = false;
         DisposeWindowResources();
         ShowOverlay(anchor, autoHide: true);
@@ -228,6 +240,40 @@ internal sealed class SwitchOverlay : Form
         }
     }
 
+    protected override void OnMouseMove(MouseEventArgs e)
+    {
+        base.OnMouseMove(e);
+
+        int index = HitTestPreview(e.Location);
+        Cursor = index >= 0 ? Cursors.Hand : Cursors.Default;
+        SetHoveredWindow(index >= 0 ? windows[index].Descriptor.Handle : 0);
+    }
+
+    protected override void OnMouseLeave(EventArgs e)
+    {
+        base.OnMouseLeave(e);
+        Cursor = Cursors.Default;
+        SetHoveredWindow(0);
+    }
+
+    protected override void OnMouseClick(MouseEventArgs e)
+    {
+        base.OnMouseClick(e);
+        if (e.Button != MouseButtons.Left)
+        {
+            return;
+        }
+
+        int index = HitTestPreview(e.Location);
+        if (index < 0)
+        {
+            return;
+        }
+
+        nint targetHandle = windows[index].Descriptor.Handle;
+        SelectionCommitted?.Invoke(this, new OverlaySelectionEventArgs(targetHandle));
+    }
+
     private void DrawHeader(Graphics graphics)
     {
         using Font headerFont = new("Segoe UI", 10.0f, FontStyle.Bold, GraphicsUnit.Point);
@@ -272,9 +318,10 @@ internal sealed class SwitchOverlay : Form
         int index)
     {
         Rectangle card = GetCardBounds(index);
-        bool selected = window.Descriptor.Handle == selectedHandle;
+        bool keyboardSelected = window.Descriptor.Handle == keyboardSelectedHandle;
+        bool mouseHovered = window.Descriptor.Handle == hoveredHandle;
         using Brush cardBackground = new SolidBrush(
-            selected ? Color.FromArgb(54, 57, 62) : Color.FromArgb(42, 44, 48));
+            keyboardSelected ? Color.FromArgb(54, 57, 62) : Color.FromArgb(42, 44, 48));
         graphics.FillRectangle(cardBackground, card);
 
         Rectangle preview = GetPreviewBounds(card);
@@ -283,31 +330,36 @@ internal sealed class SwitchOverlay : Form
 
         if (window.Thumbnail == 0)
         {
-            int iconSize = Math.Min(Px(48), Math.Min(preview.Width, preview.Height));
+            Rectangle thumbnailContent = GetThumbnailContentBounds(preview);
+            int iconSize = Math.Min(Px(48), Math.Min(thumbnailContent.Width, thumbnailContent.Height));
             graphics.DrawIcon(
                 window.Icon,
                 new Rectangle(
-                    preview.Left + (preview.Width - iconSize) / 2,
-                    preview.Top + (preview.Height - iconSize) / 2,
+                    thumbnailContent.Left + (thumbnailContent.Width - iconSize) / 2,
+                    thumbnailContent.Top + (thumbnailContent.Height - iconSize) / 2,
                     iconSize,
                     iconSize));
         }
 
-        int titleTop = preview.Bottom + Px(7);
+        Rectangle titleBand = GetTitleBounds(card);
         graphics.DrawIcon(
             window.Icon,
-            new Rectangle(card.Left + Px(9), titleTop + Px(2), Px(20), Px(20)));
+            new Rectangle(
+                card.Left + Px(9),
+                titleBand.Top + (titleBand.Height - Px(20)) / 2,
+                Px(20),
+                Px(20)));
 
         using Font titleFont = new(
             "Segoe UI",
             9.0f,
-            selected ? FontStyle.Bold : FontStyle.Regular,
+            keyboardSelected ? FontStyle.Bold : FontStyle.Regular,
             GraphicsUnit.Point);
         Rectangle titleArea = new(
             card.Left + Px(35),
-            titleTop,
+            titleBand.Top,
             card.Width - Px(43),
-            card.Bottom - titleTop - Px(5));
+            titleBand.Height);
         TextRenderer.DrawText(
             graphics,
             window.Descriptor.Title,
@@ -317,12 +369,18 @@ internal sealed class SwitchOverlay : Form
             TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis |
             TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine);
 
-        Color borderColor = selected
-            ? Color.FromArgb(96, 205, 255)
+        Color borderColor = keyboardSelected
+            ? Color.White
             : Color.FromArgb(75, 77, 82);
-        float borderWidth = selected ? Math.Max(2.0f, Px(2)) : Math.Max(1.0f, scale);
+        float borderWidth = keyboardSelected ? Math.Max(2.0f, Px(2)) : Math.Max(1.0f, scale);
         using Pen cardBorder = new(borderColor, borderWidth);
         graphics.DrawRectangle(cardBorder, card);
+
+        if (mouseHovered)
+        {
+            using Pen previewBorder = new(Color.White, Math.Max(2.0f, Px(2)));
+            graphics.DrawRectangle(previewBorder, preview);
+        }
     }
 
     private void DrawMessage(Graphics graphics)
@@ -362,7 +420,7 @@ internal sealed class SwitchOverlay : Form
 
             Rectangle destination = GetFittedThumbnailBounds(
                 window.Thumbnail,
-                GetPreviewBounds(GetCardBounds(index)));
+                GetThumbnailContentBounds(GetPreviewBounds(GetCardBounds(index))));
             NativeMethods.DwmThumbnailProperties properties = new()
             {
                 Flags = NativeMethods.DwmTnpRectDestination |
@@ -402,7 +460,7 @@ internal sealed class SwitchOverlay : Form
             height);
     }
 
-    private Rectangle GetCardBounds(int index)
+    internal Rectangle GetCardBounds(int index)
     {
         int row = index / cardColumnCount;
         int column = index % cardColumnCount;
@@ -413,13 +471,78 @@ internal sealed class SwitchOverlay : Form
         return new Rectangle(left, top, Px(CardWidth), Px(CardHeight));
     }
 
+    internal Rectangle GetTitleBounds(int index)
+    {
+        return GetTitleBounds(GetCardBounds(index));
+    }
+
+    internal Rectangle GetPreviewBounds(int index)
+    {
+        return GetPreviewBounds(GetCardBounds(index));
+    }
+
+    private int HitTestPreview(Point location)
+    {
+        if (!selectionShowing || message is not null || cardColumnCount <= 0)
+        {
+            return -1;
+        }
+
+        for (int index = 0; index < windows.Count; index++)
+        {
+            if (GetPreviewBounds(index).Contains(location))
+            {
+                return index;
+            }
+        }
+
+        return -1;
+    }
+
+    private void SetHoveredWindow(nint targetHandle)
+    {
+        if (hoveredHandle == targetHandle)
+        {
+            return;
+        }
+
+        nint previousHandle = hoveredHandle;
+        hoveredHandle = targetHandle;
+        InvalidateCard(previousHandle);
+        InvalidateCard(targetHandle);
+    }
+
+    private void InvalidateCard(nint targetHandle)
+    {
+        int index = windows.FindIndex(window => window.Descriptor.Handle == targetHandle);
+        if (index >= 0)
+        {
+            Invalidate(GetCardBounds(index));
+        }
+    }
+
     private Rectangle GetPreviewBounds(Rectangle card)
     {
         return new Rectangle(
             card.Left + Px(PreviewInset),
-            card.Top + Px(PreviewInset),
+            card.Top + Px(TitleBandHeight + PreviewInset),
             card.Width - Px(PreviewInset * 2),
             Px(PreviewHeight));
+    }
+
+    private Rectangle GetTitleBounds(Rectangle card)
+    {
+        return new Rectangle(
+            card.Left + Px(PreviewInset),
+            card.Top,
+            card.Width - Px(PreviewInset * 2),
+            Px(TitleBandHeight));
+    }
+
+    private Rectangle GetThumbnailContentBounds(Rectangle preview)
+    {
+        int inset = Px(PreviewBorderInset);
+        return Rectangle.Inflate(preview, -inset, -inset);
     }
 
     private bool HasSameWindows(IReadOnlyList<WindowDescriptor> orderedWindows)
@@ -444,6 +567,8 @@ internal sealed class SwitchOverlay : Form
         hideTimer.Stop();
         selectionShowing = false;
         message = null;
+        keyboardSelectedHandle = 0;
+        hoveredHandle = 0;
         Hide();
         DisposeWindowResources();
     }
@@ -485,4 +610,9 @@ internal sealed class SwitchOverlay : Form
     }
 
     internal readonly record struct CardGridLayout(int Columns, int Rows, Size Size);
+}
+
+internal sealed class OverlaySelectionEventArgs(nint targetHandle) : EventArgs
+{
+    public nint TargetHandle { get; } = targetHandle;
 }

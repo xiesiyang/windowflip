@@ -32,6 +32,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         inputSource.SwitchRequested += OnSwitchRequested;
         inputSource.SwitchCommitRequested += OnSwitchCommitRequested;
         inputSource.SwitchCancelRequested += OnSwitchCancelRequested;
+        overlay.SelectionCommitted += OnOverlaySelectionCommitted;
         if (!inputSource.TryRegister(out HotkeyRegistration? registration) || registration is null)
         {
             DisposeResources();
@@ -85,6 +86,19 @@ internal sealed class TrayApplicationContext : ApplicationContext
     }
 
     private void OnSwitchCommitRequested(object? sender, SwitchCommitRequestedEventArgs e)
+    {
+        CommitSelection();
+    }
+
+    private void OnOverlaySelectionCommitted(object? sender, OverlaySelectionEventArgs e)
+    {
+        if (switchCoordinator.SelectTarget(e.TargetHandle))
+        {
+            CommitSelection();
+        }
+    }
+
+    private void CommitSelection()
     {
         SwitchResult result = switchCoordinator.Commit();
         if (result.Status == SwitchStatus.NoPendingSelection)
@@ -183,6 +197,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         inputSource.SwitchRequested -= OnSwitchRequested;
         inputSource.SwitchCommitRequested -= OnSwitchCommitRequested;
         inputSource.SwitchCancelRequested -= OnSwitchCancelRequested;
+        overlay.SelectionCommitted -= OnOverlaySelectionCommitted;
         inputSource.Dispose();
         overlay.Dispose();
         menu?.Dispose();

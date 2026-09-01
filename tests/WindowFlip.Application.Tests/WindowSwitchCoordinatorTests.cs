@@ -104,6 +104,37 @@ public sealed class WindowSwitchCoordinatorTests
     }
 
     [Fact]
+    public void SelectTarget_UpdatesPendingSelectionForMouseCommit()
+    {
+        Fixture fixture = new();
+        WindowSwitchCoordinator coordinator = fixture.CreateCoordinator();
+        coordinator.Select(SwitchDirection.Next);
+
+        bool selected = coordinator.SelectTarget(3);
+        SwitchResult committed = coordinator.Commit();
+
+        Assert.True(selected);
+        Assert.Equal(SwitchStatus.Switched, committed.Status);
+        Assert.Equal((nint)3, committed.TargetHandle);
+        Assert.Equal(new nint[] { 3 }, fixture.ActivationTargets);
+    }
+
+    [Fact]
+    public void SelectTarget_RejectsWindowOutsidePendingSelection()
+    {
+        Fixture fixture = new();
+        WindowSwitchCoordinator coordinator = fixture.CreateCoordinator();
+        coordinator.Select(SwitchDirection.Next);
+
+        bool selected = coordinator.SelectTarget(99);
+        SwitchResult committed = coordinator.Commit();
+
+        Assert.False(selected);
+        Assert.Equal((nint)2, committed.TargetHandle);
+        Assert.Equal(new nint[] { 2 }, fixture.ActivationTargets);
+    }
+
+    [Fact]
     public void Cancel_DiscardsPendingSelectionWithoutActivation()
     {
         Fixture fixture = new();

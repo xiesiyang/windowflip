@@ -5,6 +5,9 @@ namespace WindowFlip.Platform.Windows.Interop;
 
 internal static partial class NativeMethods
 {
+    internal const int WmMouseMove = 0x0200;
+    internal const int WmLeftButtonDown = 0x0201;
+    internal const int WmLeftButtonUp = 0x0202;
     internal const int WsExNoActivate = 0x08000000;
     internal const int CsDropShadow = 0x00020000;
     internal const uint SwpNoActivate = 0x0010;
