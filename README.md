@@ -6,15 +6,17 @@
 
 - 运行发布版本：Microsoft 当前支持的 **Windows 10/11 x64**，无需另外安装 .NET Runtime。
 - 从源码构建：安装 **.NET 10 SDK**。
+- 构建安装程序：另外安装 **Inno Setup 6**。
 
 .NET 的支持范围与生命周期以 [Microsoft .NET 支持策略](https://dotnet.microsoft.com/platform/support/policy/dotnet-core)为准。
 
 ## 使用方式
 
-1. 运行发布目录中的 `WindowFlip.exe`。
-2. 程序启动后常驻系统托盘，不显示任务栏窗口。
-3. 在任意应用中按住快捷键的修饰键，重复按 `` ` `` 浏览该应用的窗口缩略图。
-4. 松开 `Alt`（备用组合为 `Win`）后切换到选中窗口；按 `Esc` 取消本次选择。
+1. 运行 `WindowFlip-Setup-<版本>.exe` 完成安装。
+2. 从开始菜单启动 **WindowFlip**；安装完成页默认也会直接启动程序。
+3. 程序启动后常驻系统托盘，不显示任务栏窗口。
+4. 在任意应用中按住快捷键的修饰键，重复按 `` ` `` 浏览该应用的窗口缩略图。
+5. 松开 `Alt`（备用组合为 `Win`）后切换到选中窗口；按 `Esc` 取消本次选择。
 
 | 操作 | 默认快捷键 | 备用快捷键 |
 | --- | --- | --- |
@@ -39,6 +41,7 @@ src/WindowFlip/                   WinForms 应用与 Windows 平台实现
 tests/WindowFlip.Core.Tests/      xUnit 核心单元测试
 tests/WindowFlip.Application.Tests/ 应用协调器单元测试
 tests/WindowFlip.IntegrationHost/ 真实窗口集成测试宿主
+installer/                        Inno Setup 安装器定义
 scripts/                          发布和集成测试脚本
 ```
 
@@ -93,15 +96,33 @@ $process.ExitCode
 
 ## 发布
 
+安装 [Inno Setup 6](https://jrsoftware.org/isdl.php) 后执行：
+
 ```powershell
 .\scripts\publish.ps1
 ```
 
-发布脚本生成 **win-x64、自包含、未裁剪的单文件应用**：
+也可以使用 Windows 包管理器安装构建依赖：
+
+```powershell
+winget install --id JRSoftware.InnoSetup --exact
+```
+
+发布脚本先生成 **win-x64、自包含、未裁剪的单文件应用**作为临时输入，再将其封装为仅当前用户安装、无需管理员权限的安装程序。最终只保留：
 
 ```text
-artifacts\publish\win-x64\WindowFlip.exe
+artifacts\installer\WindowFlip-Setup-1.0.0.exe
 ```
+
+安装程序会将 WindowFlip 安装到 `%LOCALAPPDATA%\Programs\WindowFlip`，创建开始菜单快捷方式并登记标准卸载入口。安装完成后默认启动应用；静默安装不会自动启动。
+
+### 安装程序验证
+
+```powershell
+.\scripts\installer-test.ps1
+```
+
+验证脚本会构建安装程序，并依次检查静默安装、开始菜单快捷方式、已安装应用自检、覆盖安装、静默卸载和开机启动项清理。为了避免影响现有环境，如果检测到已安装或正在运行的 WindowFlip，脚本会直接停止。
 
 ## 行为说明
 
