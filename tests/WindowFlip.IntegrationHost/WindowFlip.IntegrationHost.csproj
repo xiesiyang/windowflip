@@ -5,4 +5,7 @@
     <UseWindowsForms>true</UseWindowsForms>
     <AssemblyName>WindowFlip.IntegrationHost</AssemblyName>
   </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\WindowFlip\WindowFlip.csproj" />
+  </ItemGroup>
 </Project>

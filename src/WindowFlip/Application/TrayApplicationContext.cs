@@ -14,6 +14,9 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private readonly ContextMenuStrip menu;
     private readonly NotifyIcon notifyIcon;
     private readonly ToolStripMenuItem startupMenuItem;
+    private readonly DirectorySyncCoordinator directorySync;
+    private readonly IDirectorySyncSettings syncSettings;
+    private readonly IDisposable syncWorker;
     private bool disposed;
 
     public TrayApplicationContext(
@@ -21,13 +24,19 @@ internal sealed class TrayApplicationContext : ApplicationContext
         IStartupRegistration startupRegistration,
         WindowSwitchCoordinator switchCoordinator,
         SwitchOverlay overlay,
-        Icon appIcon)
+        Icon appIcon,
+        DirectorySyncCoordinator directorySync,
+        IDirectorySyncSettings syncSettings,
+        IDisposable syncWorker)
     {
         this.inputSource = inputSource;
         this.startupRegistration = startupRegistration;
         this.switchCoordinator = switchCoordinator;
         this.overlay = overlay;
         this.appIcon = appIcon;
+        this.directorySync = directorySync;
+        this.syncSettings = syncSettings;
+        this.syncWorker = syncWorker;
 
         inputSource.SwitchRequested += OnSwitchRequested;
         inputSource.SwitchCommitRequested += OnSwitchCommitRequested;
@@ -51,6 +60,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
             Visible = true
         };
         notifyIcon.DoubleClick += (_, _) => SwitchImmediately(SwitchDirection.Next);
+        directorySync.SetEnabled(syncSettings.LoadEnabled());
     }
 
     private ContextMenuStrip BuildMenu(HotkeyRegistration registration)
@@ -72,6 +82,19 @@ internal sealed class TrayApplicationContext : ApplicationContext
         };
         startupItem.Click += ToggleStartup;
         contextMenu.Items.Add(startupItem);
+
+        ToolStripMenuItem syncItem = new("自动同步文件对话框目录")
+        {
+            Checked = syncSettings.LoadEnabled(),
+            CheckOnClick = true
+        };
+        syncItem.Click += (_, _) =>
+        {
+            directorySync.SetEnabled(syncItem.Checked);
+            bool saved = syncSettings.SaveEnabled(syncItem.Checked);
+            syncItem.Text = saved ? "自动同步文件对话框目录" : "自动同步文件对话框目录（设置未保存）";
+        };
+        contextMenu.Items.Add(syncItem);
         contextMenu.Items.Add(new ToolStripSeparator());
 
         ToolStripMenuItem exitItem = new("退出");
@@ -188,6 +211,8 @@ internal sealed class TrayApplicationContext : ApplicationContext
         }
 
         disposed = true;
+        directorySync.Dispose();
+        syncWorker.Dispose();
         if (notifyIcon is not null)
         {
             notifyIcon.Visible = false;

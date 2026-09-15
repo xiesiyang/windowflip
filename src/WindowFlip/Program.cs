@@ -34,7 +34,7 @@ internal static class Program
 
         try
         {
-            using TrayApplicationContext context = CreateApplicationContext();
+            using TrayApplicationContext context = CreateApplicationContext(integrationTest);
             System.Windows.Forms.Application.Run(context);
             return 0;
         }
@@ -49,7 +49,7 @@ internal static class Program
         }
     }
 
-    private static TrayApplicationContext CreateApplicationContext()
+    private static TrayApplicationContext CreateApplicationContext(bool integrationTest)
     {
         IWindowIconProvider iconProvider = new Win32WindowIconProvider();
         SwitchOverlay overlay = new(iconProvider);
@@ -62,11 +62,29 @@ internal static class Program
             new WindowSwitchSession(),
             TimeProvider.System);
 
+        StaTaskRunner syncWorker = new();
+        DirectorySyncCoordinator directorySync = new(
+            new Win32ForegroundWindowEvents(),
+            new ShellExplorerDirectoryReader(syncWorker),
+            new WindowsFileDialogNavigator(syncWorker));
+        IDirectorySyncSettings settings = integrationTest
+            ? new IntegrationSyncSettings()
+            : new JsonDirectorySyncSettings();
+
         return new TrayApplicationContext(
             new HotkeyWindow(),
             new WindowsStartupRegistration(),
             coordinator,
             overlay,
-            appIcon);
+            appIcon,
+            directorySync,
+            settings,
+            syncWorker);
+    }
+
+    private sealed class IntegrationSyncSettings : IDirectorySyncSettings
+    {
+        public bool LoadEnabled() => false;
+        public bool SaveEnabled(bool enabled) => true;
     }
 }
