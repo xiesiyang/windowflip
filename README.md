@@ -134,7 +134,7 @@ winget install --id JRSoftware.InnoSetup --exact
 发布脚本先生成 **win-x64、自包含、未裁剪的单文件应用**作为临时输入，再将其封装为仅当前用户安装、无需管理员权限的安装程序。最终只保留：
 
 ```text
-artifacts\installer\WindowFlip-Setup-1.0.0.exe
+artifacts\installer\WindowFlip-Setup-1.1.0.exe
 ```
 
 安装程序会将 WindowFlip 安装到 `%LOCALAPPDATA%\Programs\WindowFlip`，创建开始菜单快捷方式并登记标准卸载入口。安装完成后默认启动应用；静默安装不会自动启动。
