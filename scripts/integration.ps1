@@ -12,6 +12,7 @@ $solutionPath = Join-Path $projectRoot 'WindowFlip.sln'
 $windowFlipPath = Join-Path $projectRoot "src\WindowFlip\bin\$Configuration\net10.0-windows\WindowFlip.exe"
 $hostPath = Join-Path $projectRoot "tests\WindowFlip.IntegrationHost\bin\$Configuration\net10.0-windows\WindowFlip.IntegrationHost.exe"
 $integrationState = Join-Path ([IO.Path]::GetTempPath()) ("WindowFlip.IntegrationHost.{0}.txt" -f $PID)
+$selfTestLog = Join-Path ([IO.Path]::GetTempPath()) ("WindowFlip.SelfTest.{0}.txt" -f $PID)
 $hostProcess = $null
 $windowFlipProcess = $null
 $dotnetCommand = Get-Command dotnet -ErrorAction SilentlyContinue
@@ -243,8 +244,9 @@ function Invoke-WindowFlipHotkeyTest {
 }
 
 try {
-    $selfTest = Start-Process -FilePath $windowFlipPath -ArgumentList '--self-test' -PassThru -Wait
+    $selfTest = Start-Process -FilePath $windowFlipPath -ArgumentList '--self-test' -PassThru -Wait -WindowStyle Hidden -RedirectStandardError $selfTestLog
     if ($selfTest.ExitCode -ne 0) {
+        Get-Content -LiteralPath $selfTestLog
         throw "WindowFlip self-test failed with exit code $($selfTest.ExitCode)."
     }
 
@@ -344,5 +346,8 @@ finally {
     }
     if (Test-Path -LiteralPath $integrationState) {
         Remove-Item -LiteralPath $integrationState -Force
+    }
+    if (Test-Path -LiteralPath $selfTestLog) {
+        Remove-Item -LiteralPath $selfTestLog
     }
 }

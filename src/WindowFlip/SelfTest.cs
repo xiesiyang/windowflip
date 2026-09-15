@@ -18,8 +18,9 @@ internal static class SelfTest
             VerifyThumbnailOverlay();
             return 0;
         }
-        catch
+        catch (Exception ex)
         {
+            Console.Error.WriteLine(ex);
             return 1;
         }
     }
@@ -55,6 +56,8 @@ internal static class SelfTest
         using Form second = new() { Text = "WindowFlip self-test B" };
         first.Show();
         second.Show();
+        NativeMethods.ShowWindowAsync(first.Handle, NativeMethods.SwRestore);
+        NativeMethods.ShowWindowAsync(second.Handle, NativeMethods.SwRestore);
         System.Windows.Forms.Application.DoEvents();
 
         Win32ApplicationIdentityResolver resolver = new();
@@ -120,9 +123,8 @@ internal static class SelfTest
                 firstPreview.Top + (firstPreview.Height / 2));
             nint mousePosition = PackMousePosition(firstPreviewCenter);
             Assert(
-                NativeMethods.PostMessage(overlay.Handle, NativeMethods.WmMouseMove, 0, mousePosition),
+                SendMouseMove(overlay.Handle, mousePosition),
                 "post thumbnail mouse move");
-            System.Windows.Forms.Application.DoEvents();
             Assert(overlay.HoveredHandle == forms[0].Handle, "mouse thumbnail preview");
             Assert(
                 overlay.KeyboardSelectedHandle == forms[^1].Handle,
@@ -132,19 +134,15 @@ internal static class SelfTest
                 firstTitle.Left + (firstTitle.Width / 2),
                 firstTitle.Top + (firstTitle.Height / 2));
             Assert(
-                NativeMethods.PostMessage(
+                SendMouseMove(
                     overlay.Handle,
-                    NativeMethods.WmMouseMove,
-                    0,
                     PackMousePosition(firstTitleCenter)),
                 "post title mouse move");
-            System.Windows.Forms.Application.DoEvents();
             Assert(overlay.HoveredHandle == 0, "title does not preview thumbnail");
 
             Assert(
-                NativeMethods.PostMessage(overlay.Handle, NativeMethods.WmMouseMove, 0, mousePosition),
+                SendMouseMove(overlay.Handle, mousePosition),
                 "restore thumbnail mouse move");
-            System.Windows.Forms.Application.DoEvents();
 
             Assert(
                 NativeMethods.PostMessage(overlay.Handle, NativeMethods.WmLeftButtonDown, 1, mousePosition),
@@ -168,6 +166,13 @@ internal static class SelfTest
     private static nint PackMousePosition(Point point)
     {
         return (nint)((point.Y << 16) | (point.X & 0xffff));
+    }
+
+    private static bool SendMouseMove(nint window, nint position)
+    {
+        // A queued real WM_MOUSELEAVE must not race assertions about a synthetic mouse move.
+        return NativeMethods.SendMessageTimeout(window, (uint)NativeMethods.WmMouseMove,
+            0, position, 2, 150, out _) != 0;
     }
 
     private static void Assert(bool condition, string name)
